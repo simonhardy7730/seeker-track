@@ -121,9 +121,25 @@
         return;
       }
 
-      const who = alert.label ? alert.label : 'Un proche';
-      $('lead').textContent = `${who} a besoin que vous sachiez où il/elle est.`;
-      $('sub').textContent = 'Sa position se met à jour en direct ci-dessus.';
+      // Décoder le préfixe "fall::" (chute détectée)
+      let rawLabel = alert.label || '';
+      let isFall = false;
+      if (rawLabel.indexOf('fall::') === 0) { isFall = true; rawLabel = rawLabel.slice(6); }
+      const who = rawLabel ? rawLabel : 'Un proche';
+
+      if (isFall) {
+        const b = $('banner');
+        b.style.display = 'block';
+        b.className = 'banner';
+        b.style.background = '#a8433d';
+        b.style.color = '#fff';
+        b.textContent = '⚠️ CHUTE DÉTECTÉE — la personne ne répond peut-être pas.';
+        $('lead').textContent = `${who} a peut-être fait une chute.`;
+        $('sub').textContent = "Une chute violente a été détectée et la personne n'a pas répondu. Suivez sa position et contactez-la — appelez le 112 si besoin.";
+      } else {
+        $('lead').textContent = `${who} a besoin que vous sachiez où il/elle est.`;
+        $('sub').textContent = 'Sa position se met à jour en direct ci-dessus.';
+      }
 
       // Positions déjà enregistrées
       const { data: pos } = await supabase.from('positions')
