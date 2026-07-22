@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Seeker — Suivi en direct</title>
+<meta name="robots" content="noindex" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{
+    --navy-950:#070c14; --navy-900:#0a1120; --navy-800:#101a2e; --navy-700:#1a2740;
+    --gold:#c9a961; --gold-bright:#e4c77a; --silver:#aab3c2; --ink:#eef1f6; --dim:#8b93a3;
+    --danger:#d94c47;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--navy-950);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+  header{display:flex;align-items:center;gap:10px;padding:14px 18px;background:var(--navy-900);border-bottom:1px solid rgba(201,169,97,.22)}
+  header .badge{width:26px;height:26px;border:2px solid var(--gold);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-style:italic;color:var(--gold-bright);font-size:14px}
+  header .name{font-family:Georgia,serif;letter-spacing:3px;font-size:15px}
+  .status{margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--gold-bright);display:flex;align-items:center;gap:8px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--gold-bright);box-shadow:0 0 0 0 rgba(228,199,122,.6);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(228,199,122,.6)}100%{box-shadow:0 0 0 14px rgba(228,199,122,0)}}
+  #map{height:56vh;width:100%;background:var(--navy-800)}
+  .panel{padding:18px}
+  .lead{font-family:Georgia,serif;font-size:20px;line-height:1.35;margin-bottom:6px}
+  .sub{color:var(--silver);font-size:14px;line-height:1.5}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+  .metric{background:var(--navy-900);border:1px solid rgba(201,169,97,.22);padding:12px 14px}
+  .metric .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px;font-family:ui-monospace,monospace}
+  .metric .v{font-size:17px;margin-top:4px;font-family:ui-monospace,monospace}
+  .v.gold{color:var(--gold-bright)}
+  .cta{display:block;margin-top:16px;text-align:center;background:var(--gold);color:var(--navy-950);font-weight:600;text-decoration:none;padding:15px;font-family:ui-monospace,monospace;letter-spacing:1px}
+  .banner{padding:14px 18px;text-align:center;font-family:ui-monospace,monospace;font-size:13px}
+  .banner.ended{background:var(--navy-800);color:var(--silver)}
+  .disclaimer{color:var(--dim);font-size:11px;font-family:ui-monospace,monospace;margin-top:16px;line-height:1.5}
+  .leaflet-tile{filter:grayscale(.3) brightness(.7) contrast(1.05)}
+</style>
+</head>
+<body>
+  <header>
+    <span class="badge">S</span>
+    <span class="name">SEEKER</span>
+    <span class="status" id="statusLine"><span class="dot"></span> CONNEXION…</span>
+  </header>
+
+  <div id="banner" class="banner" style="display:none"></div>
+  <div id="map"></div>
+
+  <div class="panel">
+    <div class="lead" id="lead">Chargement du suivi…</div>
+    <div class="sub" id="sub">Un instant, on récupère la position en direct.</div>
+
+    <div class="grid">
+      <div class="metric"><div class="k">Dernière position</div><div class="v gold" id="mLast">—</div></div>
+      <div class="metric"><div class="k">Temps restant</div><div class="v" id="mRemain">—</div></div>
+    </div>
+
+    <a class="cta" id="callBtn" href="tel:112">APPELER LE 112</a>
+
+    <p class="disclaimer">
+      Vous voyez cette page car un proche a déclenché une alerte Seeker et partage sa position avec vous.
+      Le suivi s'arrête automatiquement à la fin de l'alerte. Seeker ne remplace pas les services d'urgence.
+    </p>
+  </div>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    // ⚠️ À REMPLIR (voir backend/README) — la clé anon est publique par design.
+    const SUPABASE_URL = 'https://sznrgcorgirmngcraggj.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN6bnJnY29yZ2lybW5nY3JhZ2dqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2ODU3MDIsImV4cCI6MjEwMDI2MTcwMn0.vjZ5muRNNIR2gpv9ePNdV4uWMjWZn0lePiiG4XLTwl8';
+
+    const token = new URLSearchParams(location.search).get('t');
+    const $ = (id) => document.getElementById(id);
+
+    if (!token) {
+      $('lead').textContent = 'Lien invalide';
+      $('sub').textContent = "Ce lien de suivi Seeker est incomplet.";
+    } else if (SUPABASE_URL.startsWith('__')) {
+      $('lead').textContent = 'Configuration en attente';
+      $('sub').textContent = "Le backend Seeker n'est pas encore branché sur cette page.";
+    } else {
+      start();
+    }
+
+    async function start() {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      // Carte
+      const map = L.map('map', { zoomControl: true, attributionControl: false })
+        .setView([50.85, 4.35], 13); // Bruxelles par défaut
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+      const marker = L.circleMarker([50.85, 4.35], {
+        radius: 10, color: '#e4c77a', fillColor: '#c9a961', fillOpacity: .9, weight: 3,
+      }).addTo(map);
+      const trail = L.polyline([], { color: '#c9a961', weight: 3, opacity: .6 }).addTo(map);
+
+      // Alerte
+      const { data: alerts } = await supabase.from('alerts').select('*').eq('token', token).limit(1);
+      const alert = alerts && alerts[0];
+      if (!alert) {
+        $('lead').textContent = 'Alerte introuvable';
+        $('sub').textContent = "Ce lien ne correspond à aucune alerte active.";
+        $('statusLine').style.display = 'none';
+        return;
+      }
+
+      const who = alert.label ? alert.label : 'Un proche';
+      $('lead').textContent = `${who} a besoin que vous sachiez où il/elle est.`;
+      $('sub').textContent = 'Sa position se met à jour en direct ci-dessus.';
+
+      // Positions déjà enregistrées
+      const { data: pos } = await supabase.from('positions')
+        .select('lat,lng,recorded_at').eq('alert_id', alert.id).order('recorded_at');
+      (pos || []).forEach(applyPosition);
+      if (pos && pos.length) map.setView([pos[pos.length-1].lat, pos[pos.length-1].lng], 16);
+
+      // Temps réel
+      supabase.channel('pos-' + alert.id)
+        .on('postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'positions', filter: `alert_id=eq.${alert.id}` },
+            (payload) => { applyPosition(payload.new); map.panTo([payload.new.lat, payload.new.lng]); })
+        .subscribe();
+
+      $('statusLine').innerHTML = '<span class="dot"></span> EN DIRECT';
+
+      function applyPosition(p) {
+        const ll = [p.lat, p.lng];
+        marker.setLatLng(ll);
+        trail.addLatLng(ll);
+        const t = new Date(p.recorded_at);
+        $('mLast').textContent = t.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      }
+
+      // Compte à rebours + fin d'alerte
+      function tick() {
+        const end = new Date(alert.expires_at).getTime();
+        const remain = Math.max(0, end - Date.now());
+        const ended = alert.status === 'ended';
+        if (ended || remain <= 0) {
+          $('mRemain').textContent = '00:00';
+          $('statusLine').style.display = 'none';
+          const b = $('banner');
+          b.style.display = 'block';
+          b.className = 'banner ended';
+          b.textContent = ended
+            ? '✓ La personne a indiqué être en sécurité — suivi terminé.'
+            : 'Suivi terminé — la fenêtre d\'alerte est écoulée.';
+          return;
+        }
+        const m = Math.floor(remain / 60000), s = Math.floor((remain % 60000) / 1000);
+        $('mRemain').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+        setTimeout(tick, 1000);
+      }
+      // Rafraîchir le statut de l'alerte périodiquement (fin manuelle)
+      setInterval(async () => {
+        const { data } = await supabase.from('alerts').select('status,expires_at').eq('id', alert.id).limit(1);
+        if (data && data[0]) { alert.status = data[0].status; alert.expires_at = data[0].expires_at; }
+      }, 10000);
+      tick();
+    }
+  </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
+</html>
