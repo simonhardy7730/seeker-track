@@ -29,7 +29,10 @@
   .metric .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px;font-family:ui-monospace,monospace}
   .metric .v{font-size:17px;margin-top:4px;font-family:ui-monospace,monospace}
   .v.gold{color:var(--gold-bright)}
-  .cta{display:block;margin-top:16px;text-align:center;background:var(--gold);color:var(--navy-950);font-weight:600;text-decoration:none;padding:15px;font-family:ui-monospace,monospace;letter-spacing:1px}
+  .cta{display:block;margin-top:12px;text-align:center;background:var(--gold);color:var(--navy-950);font-weight:600;text-decoration:none;padding:15px;font-family:ui-monospace,monospace;letter-spacing:1px}
+  .cta.ghost{background:transparent;color:var(--silver);border:1px solid rgba(201,169,97,.3)}
+  .mini{background:var(--navy-700);color:var(--gold-bright);border:1px solid rgba(201,169,97,.3);font-family:ui-monospace,monospace;font-size:12px;padding:6px 12px;cursor:pointer}
+  .mini:active{background:var(--gold);color:var(--navy-950)}
   .banner{padding:14px 18px;text-align:center;font-family:ui-monospace,monospace;font-size:13px}
   .banner.ended{background:var(--navy-800);color:var(--silver)}
   .disclaimer{color:var(--dim);font-size:11px;font-family:ui-monospace,monospace;margin-top:16px;line-height:1.5}
@@ -55,7 +58,16 @@
       <div class="metric"><div class="k">Temps restant</div><div class="v" id="mRemain">—</div></div>
     </div>
 
-    <a class="cta" id="callBtn" href="tel:112">APPELER LE 112</a>
+    <div class="metric" style="margin-top:10px">
+      <div class="k">Coordonnées GPS</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+        <div class="v" id="mCoords" style="font-size:15px">—</div>
+        <button id="copyBtn" class="mini">Copier</button>
+      </div>
+    </div>
+
+    <a class="cta" id="routeBtn" href="#" target="_blank" rel="noopener">🚗 ITINÉRAIRE EN VOITURE</a>
+    <a class="cta ghost" id="callBtn" href="tel:112">APPELER LE 112</a>
 
     <p class="disclaimer">
       Vous voyez cette page car un proche a déclenché une alerte Seeker et partage sa position avec vous.
@@ -124,13 +136,30 @@
 
       $('statusLine').innerHTML = '<span class="dot"></span> EN DIRECT';
 
+      let current = null;
       function applyPosition(p) {
         const ll = [p.lat, p.lng];
+        current = { lat: p.lat, lng: p.lng };
         marker.setLatLng(ll);
         trail.addLatLng(ll);
         const t = new Date(p.recorded_at);
         $('mLast').textContent = t.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        // Coordonnées copiables (5 décimales ≈ précision ~1 m)
+        const coordStr = p.lat.toFixed(5) + ', ' + p.lng.toFixed(5);
+        $('mCoords').textContent = coordStr;
+        // Itinéraire voiture : Google Maps (ouvre l'app installée sur iPhone/Android)
+        $('routeBtn').href = 'https://www.google.com/maps/dir/?api=1&destination='
+          + p.lat + ',' + p.lng + '&travelmode=driving';
       }
+
+      // Copier les coordonnées dans le presse-papiers
+      $('copyBtn').addEventListener('click', async () => {
+        if (!current) return;
+        const txt = current.lat.toFixed(5) + ', ' + current.lng.toFixed(5);
+        try { await navigator.clipboard.writeText(txt); $('copyBtn').textContent = 'Copié ✓'; }
+        catch { $('copyBtn').textContent = txt; }
+        setTimeout(() => { $('copyBtn').textContent = 'Copier'; }, 2000);
+      });
 
       // Compte à rebours + fin d'alerte
       function tick() {
