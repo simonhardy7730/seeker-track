@@ -66,7 +66,7 @@
       </div>
     </div>
 
-    <a class="cta" id="routeBtn" href="#" target="_blank" rel="noopener">🚗 ITINÉRAIRE EN VOITURE</a>
+    <a class="cta" id="routeBtn" href="#" target="_blank" rel="noopener" style="opacity:.4;pointer-events:none">🚗 ITINÉRAIRE EN VOITURE</a>
     <a class="cta ghost" id="callBtn" href="tel:112">APPELER LE 112</a>
 
     <p class="disclaimer">
@@ -102,10 +102,14 @@
       const map = L.map('map', { zoomControl: true, attributionControl: false })
         .setView([50.85, 4.35], 13); // Bruxelles par défaut
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+      // Corrige l'affichage décalé de la carte sur mobile (taille mal calculée au 1er rendu)
+      setTimeout(() => map.invalidateSize(), 300);
+      window.addEventListener('resize', () => map.invalidateSize());
       const marker = L.circleMarker([50.85, 4.35], {
         radius: 10, color: '#e4c77a', fillColor: '#c9a961', fillOpacity: .9, weight: 3,
       }).addTo(map);
       const trail = L.polyline([], { color: '#c9a961', weight: 3, opacity: .6 }).addTo(map);
+      let current = null; // dernière position connue (déclarée tôt : évite la zone morte)
 
       // Alerte
       const { data: alerts } = await supabase.from('alerts').select('*').eq('token', token).limit(1);
@@ -125,7 +129,10 @@
       const { data: pos } = await supabase.from('positions')
         .select('lat,lng,recorded_at').eq('alert_id', alert.id).order('recorded_at');
       (pos || []).forEach(applyPosition);
-      if (pos && pos.length) map.setView([pos[pos.length-1].lat, pos[pos.length-1].lng], 16);
+      if (pos && pos.length) {
+        map.setView([pos[pos.length-1].lat, pos[pos.length-1].lng], 16);
+        setTimeout(() => map.invalidateSize(), 350);
+      }
 
       // Temps réel
       supabase.channel('pos-' + alert.id)
@@ -136,7 +143,6 @@
 
       $('statusLine').innerHTML = '<span class="dot"></span> EN DIRECT';
 
-      let current = null;
       function applyPosition(p) {
         const ll = [p.lat, p.lng];
         current = { lat: p.lat, lng: p.lng };
@@ -147,9 +153,15 @@
         // Coordonnées copiables (5 décimales ≈ précision ~1 m)
         const coordStr = p.lat.toFixed(5) + ', ' + p.lng.toFixed(5);
         $('mCoords').textContent = coordStr;
-        // Itinéraire voiture : Google Maps (ouvre l'app installée sur iPhone/Android)
-        $('routeBtn').href = 'https://www.google.com/maps/dir/?api=1&destination='
-          + p.lat + ',' + p.lng + '&travelmode=driving';
+        // Itinéraire voiture : Apple Plans sur iPhone (ouvre l'app direct),
+        // Google Maps ailleurs. Les deux calculent le trajet en voiture.
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        const routeBtn = $('routeBtn');
+        routeBtn.href = isIOS
+          ? `https://maps.apple.com/?daddr=${p.lat},${p.lng}&dirflg=d`
+          : `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=driving`;
+        routeBtn.style.opacity = '1';
+        routeBtn.style.pointerEvents = 'auto';
       }
 
       // Copier les coordonnées dans le presse-papiers
