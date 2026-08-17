@@ -111,8 +111,8 @@
       const trail = L.polyline([], { color: '#c9a961', weight: 3, opacity: .6 }).addTo(map);
       let current = null; // dernière position connue (déclarée tôt : évite la zone morte)
 
-      // Alerte
-      const { data: alerts } = await supabase.from('alerts').select('*').eq('token', token).limit(1);
+      // Alerte (via fonction sécurisée, par jeton — plus d'accès direct table)
+      const { data: alerts } = await supabase.rpc('get_alert_by_token', { p_token: token });
       const alert = alerts && alerts[0];
       if (!alert) {
         $('lead').textContent = 'Alerte introuvable';
@@ -141,21 +141,28 @@
         $('sub').textContent = 'Sa position se met à jour en direct ci-dessus.';
       }
 
-      // Positions déjà enregistrées
-      const { data: pos } = await supabase.from('positions')
-        .select('lat,lng,recorded_at').eq('alert_id', alert.id).order('recorded_at');
+      // Positions déjà enregistrées (via fonction sécurisée, par jeton)
+      let appliedCount = 0;
+      const { data: pos } = await supabase.rpc('get_positions_by_token', { p_token: token });
       (pos || []).forEach(applyPosition);
+      appliedCount = (pos || []).length;
       if (pos && pos.length) {
         map.setView([pos[pos.length-1].lat, pos[pos.length-1].lng], 16);
         setTimeout(() => map.invalidateSize(), 350);
       }
 
-      // Temps réel
-      supabase.channel('pos-' + alert.id)
-        .on('postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'positions', filter: `alert_id=eq.${alert.id}` },
-            (payload) => { applyPosition(payload.new); map.panTo([payload.new.lat, payload.new.lng]); })
-        .subscribe();
+      // Suivi en direct par SONDAGE (les tables sont verrouillées : plus de
+      // temps réel Supabase, on interroge la fonction toutes les 5 s et on
+      // applique seulement les positions nouvelles).
+      setInterval(async () => {
+        const { data: fresh } = await supabase.rpc('get_positions_by_token', { p_token: token });
+        if (!fresh) return;
+        for (let i = appliedCount; i < fresh.length; i++) {
+          applyPosition(fresh[i]);
+          map.panTo([fresh[i].lat, fresh[i].lng]);
+        }
+        appliedCount = fresh.length;
+      }, 5000);
 
       $('statusLine').innerHTML = '<span class="dot"></span> EN DIRECT';
 
@@ -211,7 +218,7 @@
       }
       // Rafraîchir le statut de l'alerte périodiquement (fin manuelle)
       setInterval(async () => {
-        const { data } = await supabase.from('alerts').select('status,expires_at').eq('id', alert.id).limit(1);
+        const { data } = await supabase.rpc('get_alert_by_token', { p_token: token });
         if (data && data[0]) { alert.status = data[0].status; alert.expires_at = data[0].expires_at; }
       }, 10000);
       tick();
