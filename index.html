@@ -121,25 +121,14 @@
         return;
       }
 
-      // Décoder le préfixe "fall::" (chute détectée)
+      // Les anciennes versions de l'application préfixaient le nom par "fall::" :
+      // on retire ce préfixe pour n'afficher que le nom.
       let rawLabel = alert.label || '';
-      let isFall = false;
-      if (rawLabel.indexOf('fall::') === 0) { isFall = true; rawLabel = rawLabel.slice(6); }
+      if (rawLabel.indexOf('fall::') === 0) rawLabel = rawLabel.slice(6);
       const who = rawLabel ? rawLabel : 'Un proche';
 
-      if (isFall) {
-        const b = $('banner');
-        b.style.display = 'block';
-        b.className = 'banner';
-        b.style.background = '#a8433d';
-        b.style.color = '#fff';
-        b.textContent = '⚠️ CHUTE DÉTECTÉE — la personne ne répond peut-être pas.';
-        $('lead').textContent = `${who} a peut-être fait une chute.`;
-        $('sub').textContent = "Une chute violente a été détectée et la personne n'a pas répondu. Suivez sa position et contactez-la — appelez le 112 si besoin.";
-      } else {
-        $('lead').textContent = `${who} a besoin d'aide.`;
-        $('sub').textContent = 'Sa position se met à jour en direct ci-dessus.';
-      }
+      $('lead').textContent = `${who} a besoin d'aide.`;
+      $('sub').textContent = 'Sa position se met à jour en direct ci-dessus.';
 
       // Positions déjà enregistrées (via fonction sécurisée, par jeton)
       let appliedCount = 0;
