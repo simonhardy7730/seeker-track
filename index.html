@@ -30,6 +30,7 @@
   .metric .v{font-size:17px;margin-top:4px;font-family:ui-monospace,monospace}
   .v.gold{color:var(--gold-bright)}
   .cta{display:block;margin-top:12px;text-align:center;background:var(--gold);color:var(--navy-950);font-weight:600;text-decoration:none;padding:15px;font-family:ui-monospace,monospace;letter-spacing:1px}
+  button.cta{border:0;width:100%;cursor:pointer;font-size:15px}
   .cta.ghost{background:transparent;color:var(--silver);border:1px solid rgba(201,169,97,.3)}
   .mini{background:var(--navy-700);color:var(--gold-bright);border:1px solid rgba(201,169,97,.3);font-family:ui-monospace,monospace;font-size:12px;padding:6px 12px;cursor:pointer}
   .mini:active{background:var(--gold);color:var(--navy-950)}
@@ -64,6 +65,13 @@
         <div class="v" id="mCoords" style="font-size:15px">—</div>
         <button id="copyBtn" class="mini">Copier</button>
       </div>
+    </div>
+
+    <div id="intervene" style="display:none;margin-top:14px">
+      <div id="responders" class="banner ended" style="display:none"></div>
+      <input id="rName" maxlength="40" placeholder="Votre prénom" autocomplete="given-name"
+             style="width:100%;margin-top:10px;padding:13px;background:var(--navy-900);color:var(--ink);border:1px solid rgba(201,169,97,.3);font-size:16px" />
+      <button id="goBtn" class="cta">J'INTERVIENS</button>
     </div>
 
     <a class="cta" id="routeBtn" href="#" target="_blank" rel="noopener" style="opacity:.4;pointer-events:none">🚗 ITINÉRAIRE EN VOITURE</a>
@@ -175,6 +183,52 @@
         routeBtn.style.opacity = '1';
         routeBtn.style.pointerEvents = 'auto';
       }
+
+      // « J'interviens » : les autres proches voient qui s'en occupe. La zone
+      // reste cachée si le serveur ne propose pas encore la fonction.
+      let device = null;
+      try { device = localStorage.getItem('seeker.device'); } catch {}
+      if (!device) {
+        device = crypto.randomUUID();
+        try { localStorage.setItem('seeker.device', device); } catch {}
+      }
+      let mine = false;
+
+      async function refreshResponders() {
+        const { data, error } = await supabase.rpc('get_responders_by_token',
+          { p_token: token, p_device: device });
+        const open = alert.status === 'active' && new Date(alert.expires_at) > new Date();
+        $('intervene').style.display = !error && open ? 'block' : 'none';
+        if (error) return;
+        mine = (data || []).some((r) => r.mine);
+        const others = (data || []).filter((r) => !r.mine).map((r) => r.name || 'Un proche');
+        const lines = [];
+        if (others.length) lines.push(others.join(', ') + ' · intervient déjà. Restez joignable.');
+        if (mine) lines.push('Les autres proches voient que vous intervenez.');
+        $('responders').textContent = lines.join(' ');
+        $('responders').style.display = lines.length ? 'block' : 'none';
+        $('rName').style.display = mine ? 'none' : 'block';
+        $('goBtn').textContent = mine ? 'JE NE PEUX PLUS INTERVENIR' : "J'INTERVIENS";
+        $('goBtn').classList.toggle('ghost', mine);
+      }
+
+      $('goBtn').addEventListener('click', async () => {
+        const name = $('rName').value.trim();
+        if (!mine && !name) { $('rName').focus(); return; }
+        $('goBtn').disabled = true;
+        const { error } = mine
+          ? await supabase.rpc('cancel_intervention_by_token', { p_token: token, p_device: device })
+          : await supabase.rpc('intervene_by_token', { p_token: token, p_device: device, p_name: name });
+        $('goBtn').disabled = false;
+        if (error) {
+          $('responders').textContent = 'Envoi impossible. Réessayez.';
+          $('responders').style.display = 'block';
+          return;
+        }
+        refreshResponders();
+      });
+      refreshResponders();
+      setInterval(refreshResponders, 5000);
 
       // Copier les coordonnées dans le presse-papiers
       $('copyBtn').addEventListener('click', async () => {
